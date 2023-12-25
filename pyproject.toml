@@ -1,0 +1,98 @@
+[build-system]
+requires = ["poetry>=1.0"]
+build-backend = "poetry.masonry.api"
+
+[tool.poetry]
+name = "rlsv"
+version = "0.1.0"
+description = "Reef Life Survey volunteer data validator"
+license = "MIT"
+authors = ["Yanir Seroussi <rls@yanirseroussi.com>"]
+readme = "README.md"
+repository = "https://github.com/yanirs/rls-validator"
+
+keywords = []
+
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[tool.poetry.dependencies]
+python = "~3.10"
+openpyxl = "~3.1.2"
+pandas = "~2.1.4"
+streamlit = "~1.29.0"
+xlrd = "~2.0.1"
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "~3.6.0"
+pytest = "~7.4.3"
+pytest-cov = "~4.1.0"
+pytest-mock = "~3.12.0"
+mypy = "~1.8.0"
+
+[tool.ruff]
+select = [
+  "A",  # flake8-builtins
+  "ARG",  # flake8-unused-arguments
+  "B",  # flake8-bugbear
+  "C4",  # flake8-comprehensions
+  "D",  # pydocstyle
+  "DTZ",  # flake8-datetimez
+  "E",  # pycodestyle errors
+  "F",  # pyflakes
+  "G",  # flake8-logging-format
+  "I",  # isort
+  "ICN",  # flake8-import-conventions
+  "INP",  # flake8-no-pep420
+  "ISC",  # flake8-implicit-str-concat
+  "N",  # pep8-naming
+  "NPY",  # NumPy-specific rules
+  "PD",  # pandas-vet
+  "PIE",  # flake8-pie
+  "PT",  # flake8-pytest-style
+  "PTH",  # flake8-use-pathlib
+  "RET",  # flake8-return
+  "RUF",  # Ruff-specific rules
+  "S",  # flake8-bandit
+  "SIM",  # flake8-simplify
+  "UP",  # pyupgrade
+  "YTT",  # flake8-2020
+]
+ignore = [
+  "C408",  # unnecessary-collection-call
+  "D203",  # one-blank-line-before-class
+  "D212",  # multi-line-summary-first-line
+  "PD002",  # pandas-use-of-inplace-argument
+  "RUF001",  # ambiguous-unicode-character-string
+  "S101",  # assert
+]
+
+[tool.ruff.per-file-ignores]
+# No need for doc requirements on test files.
+"tests/test_*.py" = ["D100", "D103"]
+
+[tool.mypy]
+check_untyped_defs = true
+disallow_incomplete_defs = true
+ignore_missing_imports = true
+show_error_codes = true
+strict = true
+
+[tool.pytest.ini_options]
+# Directories that are not visited by pytest collector:
+norecursedirs = "*.egg .eggs dist build docs .tox .git __pycache__"
+
+# Extra options:
+addopts = [
+  "--strict-markers",
+  "--doctest-modules",
+  "--cov=rlsv",
+  "--cov-report=term:skip-covered",
+  "--cov-report=html",
+  "--cov-branch",
+  "--cov-append",
+]
