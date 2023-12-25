@@ -26,7 +26,7 @@ Vagrant.configure("2") do |config|
     poetry install
     poetry run pre-commit install
     echo "Running Streamlit in screen ('screen -r streamlit'), check http://localhost:8501/"
-    screen -dmS streamlit bash -c "poetry run streamlit run rlsv/app.py"
+    screen -dmS streamlit bash -c "poetry run streamlit run --server.runOnSave true --server.fileWatcherType poll rlsv/app.py"
   SHELL
 
   config.vm.provision "shell", name: "apt-upgrade", run: "always", inline: <<-SHELL
