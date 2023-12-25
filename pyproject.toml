@@ -66,6 +66,7 @@ ignore = [
   "D203",  # one-blank-line-before-class
   "D212",  # multi-line-summary-first-line
   "PD002",  # pandas-use-of-inplace-argument
+  "PD901",  # pandas-df-variable-name
   "RUF001",  # ambiguous-unicode-character-string
   "S101",  # assert
 ]
