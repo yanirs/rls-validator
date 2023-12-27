@@ -2,8 +2,11 @@
 import dataclasses
 import io
 import json
-from typing import Sequence
+import math
+from collections import defaultdict
+from typing import Any, Sequence
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -29,13 +32,27 @@ def main() -> None:
 
     # TODO: add checkboxes for disabling specific checks?
     info_messages = ["* Parsed file and found the data sheet with valid columns."]
-    drop_ignored_columns = st.checkbox(
-        "Drop ignored columns",
-        value=True,
-        help="This makes the output easier to scroll through",
-    )
+    col1, col2, col3, _ = st.columns([0.1, 0.2, 0.2, 0.5])
+    with col1:
+        st.write("### Settings")
+    with col2:
+        drop_ignored_columns = st.checkbox(
+            "Drop ignored columns",
+            value=True,
+            help="This makes the output easier to scroll through",
+        )
+    with col3:
+        distribution_distance_km = st.number_input(
+            "Distance in kilometres for species distribution checks", value=500
+        )
 
     # TODO: turn this block into a tested function
+    unique_sites = (
+        data_df[["Site No.", "Latitude", "Longitude"]].drop_duplicates().dropna()
+    )
+    info_messages.append(
+        f"* Found {len(unique_sites)} unique sites: {sorted(unique_sites['Site No.'])}."
+    )
     if data_df.iloc[0, :10].isna().all():
         info_messages.append("* Skipped first non-header row (assumed empty example).")
         data_df = data_df.iloc[1:].reset_index(drop=True)
@@ -43,8 +60,6 @@ def main() -> None:
         ignored_columns = [
             "Buddy",
             "Site Name",
-            "Latitude",
-            "Longitude",
             "vis",
             "Direction",
             "Time",
@@ -68,8 +83,6 @@ def main() -> None:
     )
     data_df["Method"] = data_df["Method"].astype(int)
 
-    # TODO: apply other validations that rely on external data -- copy from chat
-    # TODO: better to iterate over rows once? check
     size_columns = data_df.columns[data_df.columns.get_loc("Inverts") + 1 :]
     data_df["Sized"] = data_df[size_columns].sum(axis=1) > 0
     data_df["Max size"] = (
@@ -96,26 +109,38 @@ def main() -> None:
     )
 
     # TODO: make this a separate function; consider vectorising
-    all_species_info, families_and_genera = _load_species_info()
+    json_name_to_data = _load_rls_data_jsons()
+    all_species_info, families_and_genera = _parse_species_info(
+        json_name_to_data["species"]
+    )
+    valid_spps = families_and_genera.union(
+        species_name.split()[0]
+        for species_name in json_name_to_data["surveys"]
+        if species_name.endswith("spp.")
+    )
+    site_to_expected_species = _get_site_to_expected_species(
+        json_name_to_data["sites"],
+        json_name_to_data["surveys"],
+        unique_sites,
+        distribution_distance_km,
+    )
     species_known = []
     method_matches = []
     m1_sized = []
     max_size_ok = []
     expected_max_sizes: list[int | None] = []
+    species_in_distribution = []
+    supersedings_used = {}
     for _, row in data_df.iterrows():
-        # TODO: warn on superseding?
         is_debris = row["Species"].startswith("Debris")
         is_spp = row["Species"].endswith("spp.")
-        # TODO: also get valid spp. from surveys.json
-        # TODO: consider sizing and checking methods for spp. (split is_debris/spp then)
         if is_debris or is_spp:
-            species_known.append(
-                is_debris or row["Species"].split()[0] in families_and_genera
-            )
+            species_known.append(is_debris or row["Species"].split()[0] in valid_spps)
             method_matches.append(is_spp or row["Method"] in (0, 2))
             m1_sized.append(True)
             max_size_ok.append(True)
             expected_max_sizes.append(None)
+            species_in_distribution.append(True)
             continue
         species_info = all_species_info.get(row["Species"])
         if not species_info:
@@ -124,10 +149,18 @@ def main() -> None:
             m1_sized.append(False)
             max_size_ok.append(False)
             expected_max_sizes.append(None)
+            species_in_distribution.append(False)
             continue
+        if species_info.superseded_by_name:
+            supersedings_used[species_info.name] = species_info.superseded_by_name
         species_known.append(True)
         method_matches.append(
             row["Method"] == 0 or row["Method"] in species_info.methods
+        )
+        species_in_distribution.append(
+            species_info.name in site_to_expected_species[row["Site No."]]
+            or species_info.superseded_by_name
+            in site_to_expected_species[row["Site No."]]
         )
         if [2] == species_info.methods:
             m1_sized.append(True)
@@ -149,6 +182,7 @@ def main() -> None:
     validation_df["M1 sized"] = m1_sized
     validation_df["Max size OK"] = max_size_ok
     validation_df["Expected max size"] = expected_max_sizes
+    validation_df["Species in distribution"] = species_in_distribution
 
     st.info("\n".join(info_messages))
     validation_with_data_df = pd.concat([validation_df, data_df], axis=1)
@@ -167,6 +201,14 @@ def main() -> None:
         )
     else:
         st.success("No suspicious rows found. :tada:")
+    if supersedings_used:
+        st.warning(
+            "**Warning:** Found the following superseded names.\n"
+            + "\n".join(
+                f"* _{superseded_name}_ (accepted name: _{current_name}_)"
+                for superseded_name, current_name in supersedings_used.items()
+            )
+        )
     show_all_rows = st.checkbox("Show all the rows that got checked")
     if show_all_rows:
         st.dataframe(
@@ -195,6 +237,9 @@ def main() -> None:
           the RLS database. Note that this excludes species for which sizing isn't
           expected or for which there is no data. The expected max size is shown in the
           `Expected max size` column. It's not always right, so use your best judgement.
+        * `Species in distribution`: The species was recorded within the specified
+          distance from the site. If it wasn't, provide a picture for verification when
+          submitting the data.
     """
     )
 
@@ -276,13 +321,21 @@ class SpeciesInfo:
     superseded_by_name: str | None
 
 
+def _load_rls_data_jsons(
+    base_url: str = "https://raw.githubusercontent.com/yanirs/rls-data/master/output",
+):
+    json_name_to_data = {}
+    for json_name in ("sites", "species", "surveys"):
+        with download_text_file(f"{base_url}/{json_name}.json").open() as json_file:
+            json_name_to_data[json_name] = json.load(json_file)
+    return json_name_to_data
+
+
 # TODO: add @st.cache_data or move to data.py and cache everything that's loaded.
-def _load_species_info(
-    url: str = "https://raw.githubusercontent.com/yanirs/rls-data/master/output/species.json",
+def _parse_species_info(
+    raw_species_data: list[dict[str, Any]],
 ) -> tuple[dict[str, SpeciesInfo], set[str]]:
     """Load species JSON data to SpeciesInfo and a set of valid families & genera."""
-    with download_text_file(url).open() as json_file:
-        raw_species_data = json.load(json_file)
     families_and_genera = set()
     all_species_info = {}
     for species in raw_species_data:
@@ -290,21 +343,87 @@ def _load_species_info(
             families_and_genera.add(species["family"])
         if "genus" in species:
             families_and_genera.add(species["genus"])
-        # TODO: round up max_length_cm to a valid size class to reduce false negatives
+        max_length_cm = _round_max_length_cm(species.get("max_length_cm"))
+        methods = species.get("methods") or []
         all_species_info[species["scientific_name"]] = SpeciesInfo(
             name=species["scientific_name"],
-            max_length_cm=species.get("max_length_cm"),
-            methods=species.get("methods") or [],
+            max_length_cm=max_length_cm,
+            methods=methods,
             superseded_by_name=None,
         )
         for superseded_name in species.get("superseded_names", ()):
             all_species_info[superseded_name] = SpeciesInfo(
                 name=superseded_name,
-                max_length_cm=species.get("max_length_cm"),
-                methods=species.get("methods") or [],
+                max_length_cm=max_length_cm,
+                methods=methods,
                 superseded_by_name=species["scientific_name"],
             )
     return all_species_info, families_and_genera
+
+
+def _round_max_length_cm(max_length_cm: float | None) -> float | None:
+    """Round max_length_cm up to the nearest size class."""
+    if not max_length_cm:
+        return max_length_cm
+    if max_length_cm < 15:
+        return 2.5 * math.ceil(max_length_cm / 2.5)
+    if max_length_cm < 40:
+        return 5 * math.ceil(max_length_cm / 5)
+    if max_length_cm < 200:
+        return 12.5 * math.ceil(max_length_cm / 12.5)
+    return 50 * math.ceil(max_length_cm / 50)
+
+
+def _get_site_to_expected_species(
+    raw_site_data: dict[str, Any],
+    raw_survey_data: dict[str, dict[str, int]],
+    unique_sites: pd.DataFrame,
+    distribution_distance_km: int,
+) -> dict[str, set[str]]:
+    site_df = pd.DataFrame(raw_site_data["rows"], columns=raw_site_data["keys"])
+    site_df["latitude_rad"] = site_df["latitude"].map(np.radians)
+    site_df["longitude_rad"] = site_df["longitude"].map(np.radians)
+    site_to_species = defaultdict(set)
+    for species_name, species_observations in raw_survey_data.items():
+        for site in species_observations:
+            site_to_species[site].add(species_name)
+    site_to_expected_species = {}
+    for site, lat, lon in unique_sites.itertuples(index=False):
+        site_distances = estimate_earth_distance(
+            np.radians(lat),
+            np.radians(lon),
+            site_df["latitude_rad"],
+            site_df["longitude_rad"],
+        )
+        site_to_expected_species[site] = set()
+        for nearby_site in site_df.loc[site_distances <= distribution_distance_km][
+            "site_code"
+        ]:
+            site_to_expected_species[site].update(site_to_species[nearby_site])
+    return site_to_expected_species
+
+
+def estimate_earth_distance(lon1, lat1, lon2, lat2, earth_radius_km=6371):
+    """
+    Estimate the kilometre distance between two coordinates specified in radians.
+
+    Adapted from https://stackoverflow.com/a/4913653 and ChatGPT output. Accepts scalars
+    and arrays.
+
+    This function is expected to be inaccurate for distant points, but should be good
+    enough for our purposes. It's orders of magnitude faster than applying geopy's
+    distance function, so it works well for a large number of calculations.
+    """
+    return (
+        2
+        * earth_radius_km
+        * np.arcsin(
+            np.sqrt(
+                np.sin((lat2 - lat1) / 2) ** 2
+                + np.cos(lat1) * np.cos(lat2) * np.sin((lon2 - lon1) / 2) ** 2
+            )
+        )
+    )
 
 
 if __name__ == "__main__":
