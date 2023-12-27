@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from rlsv.data import download_text_file
+from rlsv.util import estimate_earth_distance
 
 
 def main() -> None:
@@ -128,7 +129,7 @@ def main() -> None:
     method_matches = []
     m1_sized = []
     max_size_ok = []
-    expected_max_sizes: list[int | None] = []
+    expected_max_sizes: list[float | None] = []
     species_in_distribution = []
     supersedings_used = {}
     for _, row in data_df.iterrows():
@@ -316,14 +317,14 @@ class SpeciesInfo:
     """The subset of species info relevant to this app."""
 
     name: str
-    max_length_cm: int | None
+    max_length_cm: float | None
     methods: Sequence[int]
     superseded_by_name: str | None
 
 
 def _load_rls_data_jsons(
     base_url: str = "https://raw.githubusercontent.com/yanirs/rls-data/master/output",
-):
+) -> dict[str, Any]:
     json_name_to_data = {}
     for json_name in ("sites", "species", "surveys"):
         with download_text_file(f"{base_url}/{json_name}.json").open() as json_file:
@@ -378,7 +379,7 @@ def _get_site_to_expected_species(
     raw_site_data: dict[str, Any],
     raw_survey_data: dict[str, dict[str, int]],
     unique_sites: pd.DataFrame,
-    distribution_distance_km: int,
+    distribution_distance_km: float,
 ) -> dict[str, set[str]]:
     site_df = pd.DataFrame(raw_site_data["rows"], columns=raw_site_data["keys"])
     site_df["latitude_rad"] = site_df["latitude"].map(np.radians)
@@ -387,9 +388,9 @@ def _get_site_to_expected_species(
     for species_name, species_observations in raw_survey_data.items():
         for site in species_observations:
             site_to_species[site].add(species_name)
-    site_to_expected_species = {}
+    site_to_expected_species: dict[str, set[str]] = {}
     for site, lat, lon in unique_sites.itertuples(index=False):
-        site_distances = estimate_earth_distance(
+        site_distances: pd.Series = estimate_earth_distance(  # type: ignore[no-untyped-call]
             np.radians(lat),
             np.radians(lon),
             site_df["latitude_rad"],
@@ -401,29 +402,6 @@ def _get_site_to_expected_species(
         ]:
             site_to_expected_species[site].update(site_to_species[nearby_site])
     return site_to_expected_species
-
-
-def estimate_earth_distance(lon1, lat1, lon2, lat2, earth_radius_km=6371):
-    """
-    Estimate the kilometre distance between two coordinates specified in radians.
-
-    Adapted from https://stackoverflow.com/a/4913653 and ChatGPT output. Accepts scalars
-    and arrays.
-
-    This function is expected to be inaccurate for distant points, but should be good
-    enough for our purposes. It's orders of magnitude faster than applying geopy's
-    distance function, so it works well for a large number of calculations.
-    """
-    return (
-        2
-        * earth_radius_km
-        * np.arcsin(
-            np.sqrt(
-                np.sin((lat2 - lat1) / 2) ** 2
-                + np.cos(lat1) * np.cos(lat2) * np.sin((lon2 - lon1) / 2) ** 2
-            )
-        )
-    )
 
 
 if __name__ == "__main__":
