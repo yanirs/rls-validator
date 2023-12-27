@@ -4,12 +4,20 @@ import io
 import json
 import math
 from collections import defaultdict
+from operator import methodcaller
 from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
+from rlsv.constants import (
+    ALL_COLUMNS,
+    DUPLICATE_CHECK_COLUMNS,
+    IGNORED_COLUMNS,
+    SIZE_COLUMNS,
+    VALIDATION_HELP_TEXT,
+)
 from rlsv.data import download_text_file
 from rlsv.util import estimate_earth_distance
 
@@ -22,6 +30,7 @@ def main() -> None:
         "Upload your spreadsheet for validation. Save XLS files as XLSX if you're "
         "working with an older template. Alternatively, export the data sheet to CSV."
     )
+
     uploaded_file = st.file_uploader("Choose a file", type=["csv", "xlsx"])
     if uploaded_file is None:
         return
@@ -31,8 +40,78 @@ def main() -> None:
         st.error(f"Unable to parse the file. Error: {ex}")
         return
 
+    settings = _get_app_settings()
+    data_df, info_messages = _tweak_data_df(data_df, settings)
+    validation_df = _run_basic_validations(data_df)
+    validation_df, expected_max_sizes, supersedings_used = _run_rls_data_validations(
+        data_df, validation_df, info_messages, settings
+    )
+    failed_validation_mask = (~validation_df).sum(axis=1).astype(bool)
+    # Showing the expected max size next to the row max size to aid manual fixing.
+    validation_df["Expected max size"] = expected_max_sizes
+    validation_df["Row max size"] = data_df.pop("Row max size")
+    validation_with_data_df = pd.concat([validation_df, data_df], axis=1)
+
+    st.info("\n".join(info_messages))
+    if failed_validation_mask.any():
+        st.error(
+            f"Found {failed_validation_mask.sum()} suspicious rows. "
+            "Please fix them and re-upload the file."
+        )
+        st.dataframe(
+            validation_with_data_df[failed_validation_mask],
+            hide_index=True,
+            column_config={"Date": st.column_config.DateColumn()},
+        )
+    else:
+        st.success("No suspicious rows found. :tada:")
+    if supersedings_used:
+        st.warning(
+            "**Warning:** Found the following superseded names.\n"
+            + "\n".join(
+                f"* _{superseded_name}_ (accepted name: _{current_name}_)"
+                for superseded_name, current_name in supersedings_used.items()
+            )
+        )
+    show_all_rows = st.checkbox("Show all the rows that got checked")
+    if show_all_rows:
+        st.dataframe(
+            validation_with_data_df,
+            hide_index=True,
+            column_config={"Date": st.column_config.DateColumn()},
+        )
+
+    st.write(VALIDATION_HELP_TEXT)
+
+
+# TODO: move functions into separate files and add tests
+def _parse_uploaded_file(
+    uploaded_file: io.BytesIO,
+    sheet_name: str = "DATA",
+) -> pd.DataFrame:
+    if uploaded_file.name.endswith(".csv"):
+        df = pd.read_csv(uploaded_file)
+    else:
+        xls = pd.ExcelFile(uploaded_file)
+        if sheet_name not in xls.sheet_names:
+            raise ValueError(f"No sheet named '{sheet_name}' found.")
+        df = xls.parse(sheet_name)
+        df.columns = df.columns.astype(str)
+    if df.columns.tolist() != list(ALL_COLUMNS):
+        raise ValueError(f"Columns don't match expected names: {ALL_COLUMNS}")
+    return df
+
+
+@dataclasses.dataclass
+class _AppSettings:
+    drop_ignored_columns: bool
+    distribution_distance_km: float
+
+
+def _get_app_settings() -> _AppSettings:
+    """Get basic setting values."""
     # TODO: add checkboxes for disabling specific checks?
-    info_messages = ["* Parsed file and found the data sheet with valid columns."]
+    # TODO: add checkbox for hiding fully passed checks?
     col1, col2, col3, _ = st.columns([0.1, 0.2, 0.2, 0.5])
     with col1:
         st.write("### Settings")
@@ -46,29 +125,27 @@ def main() -> None:
         distribution_distance_km = st.number_input(
             "Distance in kilometres for species distribution checks", value=500
         )
+    return _AppSettings(drop_ignored_columns, distribution_distance_km)
 
-    # TODO: turn this block into a tested function
-    unique_sites = (
-        data_df[["Site No.", "Latitude", "Longitude"]].drop_duplicates().dropna()
-    )
-    info_messages.append(
-        f"* Found {len(unique_sites)} unique sites: {sorted(unique_sites['Site No.'])}."
-    )
+
+def _tweak_data_df(
+    data_df: pd.DataFrame, settings: _AppSettings
+) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Tweak data_df to exclude empty rows & ignored columns, adding "Row max size".
+
+    "Row max size" is the maximum size reported in a given row if any of the
+    SIZE_COLUMNS isn't NaN (expected for method 1 and sized method 2 species).
+
+    Return the tweaked data_df along with a list of info messages.
+    """
+    info_messages = ["* Parsed file and found the data sheet with valid columns."]
     if data_df.iloc[0, :10].isna().all():
         info_messages.append("* Skipped first non-header row (assumed empty example).")
         data_df = data_df.iloc[1:].reset_index(drop=True)
-    if drop_ignored_columns:
-        ignored_columns = [
-            "Buddy",
-            "Site Name",
-            "vis",
-            "Direction",
-            "Time",
-            "P-Qs",
-            "Common name",
-        ]
-        data_df = data_df.drop(columns=ignored_columns)
-        info_messages.append(f"* Dropped ignored columns: {ignored_columns}.")
+    if settings.drop_ignored_columns:
+        data_df = data_df.drop(columns=IGNORED_COLUMNS)
+        info_messages.append(f"* Dropped ignored columns: {IGNORED_COLUMNS}.")
     non_zero_cumsum = (data_df["Total"] != 0).cumsum()
     zero_streak_start_index = (
         non_zero_cumsum[non_zero_cumsum == non_zero_cumsum.iloc[-1]].index[0] + 1
@@ -83,33 +160,46 @@ def main() -> None:
         f"* Ran validations on the {len(data_df)} remaining data rows."
     )
     data_df["Method"] = data_df["Method"].astype(int)
-
-    size_columns = data_df.columns[data_df.columns.get_loc("Inverts") + 1 :]
-    data_df["Sized"] = data_df[size_columns].sum(axis=1) > 0
-    data_df["Max size"] = (
-        data_df[size_columns]
-        .apply(lambda row: row.last_valid_index(), axis=1)
+    data_df["Row max size"] = (
+        data_df[SIZE_COLUMNS]
+        .apply(methodcaller("last_valid_index"), axis=1)
         .astype(float)
     )
-    duplicate_check_columns = [
-        "Diver",
-        "Site No.",
-        "Date",
-        "Depth",
-        "Method",
-        "Block",
-        "Species",
-    ]
-    validation_df = pd.DataFrame(
+    return data_df, info_messages
+
+
+def _run_basic_validations(data_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Run basic validations on the data_df, returning a DataFrame with boolean columns.
+
+    The returned DataFrame has the same index as data_df. This function assumes that
+    the max size reported for each row has been added as to data_df as "Row max size".
+    """
+    return pd.DataFrame(
         {
             "Species present": data_df["Species"] != "NOT PRESENT",
             "Total > 0": data_df["Total"] > 0,
-            "Only inverts or sized": (data_df["Inverts"] > 0) ^ data_df["Sized"],
-            "Unique": ~data_df[duplicate_check_columns].duplicated(keep=False),
+            "Only inverts or sized": (data_df["Inverts"] > 0)
+            ^ data_df["Row max size"].notna(),
+            "Unique": ~data_df[DUPLICATE_CHECK_COLUMNS].duplicated(keep=False),
         }
     )
 
-    # TODO: make this a separate function; consider vectorising
+
+def _run_rls_data_validations(
+    data_df: pd.DataFrame,
+    validation_df: pd.DataFrame,
+    info_messages: list[str],
+    settings: _AppSettings,
+) -> tuple[pd.DataFrame, list[float | None], dict[str, str]]:
+    """
+    Run validations that are based on existing RLS data.
+
+    Return the extended validation_df, list of expected max sizes for each row, and
+    mapping from superseded to accepted name.
+
+    Additional info messages are added to info_messages.
+    """
     json_name_to_data = _load_rls_data_jsons()
     all_species_info, families_and_genera = _parse_species_info(
         json_name_to_data["species"]
@@ -119,11 +209,17 @@ def main() -> None:
         for species_name in json_name_to_data["surveys"]
         if species_name.endswith("spp.")
     )
+    unique_sites = (
+        data_df[["Site No.", "Latitude", "Longitude"]].drop_duplicates().dropna()
+    )
+    info_messages.append(
+        f"* Found {len(unique_sites)} unique sites: {sorted(unique_sites['Site No.'])}."
+    )
     site_to_expected_species = _get_site_to_expected_species(
         json_name_to_data["sites"],
         json_name_to_data["surveys"],
         unique_sites,
-        distribution_distance_km,
+        settings.distribution_distance_km,
     )
     species_known = []
     method_matches = []
@@ -132,6 +228,7 @@ def main() -> None:
     expected_max_sizes: list[float | None] = []
     species_in_distribution = []
     supersedings_used = {}
+    # TODO: consider vectorising
     for _, row in data_df.iterrows():
         is_debris = row["Species"].startswith("Debris")
         is_spp = row["Species"].endswith("spp.")
@@ -168,148 +265,24 @@ def main() -> None:
             max_size_ok.append(True)
             expected_max_sizes.append(None)
         else:
-            m1_sized.append(1 in species_info.methods and row["Sized"])
+            m1_sized.append(
+                1 in species_info.methods and not np.isnan(row["Row max size"])
+            )
             # TODO: consider getting observed min-max sizes (needs rls-data change:
             # TODO: sizes.json based on observations)
             max_size_ok.append(
                 bool(
                     not species_info.max_length_cm
-                    or row["Max size"] <= species_info.max_length_cm
+                    or row["Row max size"] <= species_info.max_length_cm
                 )
             )
             expected_max_sizes.append(species_info.max_length_cm)
     validation_df["Species known"] = species_known
+    validation_df["Species expected"] = species_in_distribution
     validation_df["Method matches"] = method_matches
     validation_df["M1 sized"] = m1_sized
     validation_df["Max size OK"] = max_size_ok
-    validation_df["Expected max size"] = expected_max_sizes
-    validation_df["Species in distribution"] = species_in_distribution
-
-    st.info("\n".join(info_messages))
-    validation_with_data_df = pd.concat([validation_df, data_df], axis=1)
-    failed_validation_mask = (
-        (~validation_df.drop(columns=["Expected max size"])).sum(axis=1).astype(bool)
-    )
-    if failed_validation_mask.any():
-        st.error(
-            f"Found {failed_validation_mask.sum()} suspicious rows. "
-            "Please fix them and re-upload the file."
-        )
-        st.dataframe(
-            validation_with_data_df[failed_validation_mask],
-            hide_index=True,
-            column_config={"Date": st.column_config.DateColumn()},
-        )
-    else:
-        st.success("No suspicious rows found. :tada:")
-    if supersedings_used:
-        st.warning(
-            "**Warning:** Found the following superseded names.\n"
-            + "\n".join(
-                f"* _{superseded_name}_ (accepted name: _{current_name}_)"
-                for superseded_name, current_name in supersedings_used.items()
-            )
-        )
-    show_all_rows = st.checkbox("Show all the rows that got checked")
-    if show_all_rows:
-        st.dataframe(
-            validation_with_data_df,
-            hide_index=True,
-            column_config={"Date": st.column_config.DateColumn()},
-        )
-
-    st.write(
-        f"""
-        ---
-        ### Validations
-
-        * `Species present`: The 'Species' column value isn't "NOT PRESENT".
-        * `Total > 0`: The 'Total' column value is greater than zero.
-        * `Only inverts or sized`: Either the 'Inverts' column contains a non-zero
-          count, or the size columns (not both).
-        * `Unique`: The row is a unique record when considering only these columns:
-          {duplicate_check_columns}.
-        * `Species known`: The species exists in the RLS database.
-        * `Method matches`: One of the methods recorded for the species in the RLS
-          database was used.
-        * `M1 sized`: If the species is a Method 1 species, its size was entered (even
-          if entered under Method 2).
-        * `Max size OK`: The entered maximum size is less than or equal to the size in
-          the RLS database. Note that this excludes species for which sizing isn't
-          expected or for which there is no data. The expected max size is shown in the
-          `Expected max size` column. It's not always right, so use your best judgement.
-        * `Species in distribution`: The species was recorded within the specified
-          distance from the site. If it wasn't, provide a picture for verification when
-          submitting the data.
-    """
-    )
-
-
-def _parse_uploaded_file(
-    uploaded_file: io.BytesIO,
-    sheet_name: str = "DATA",
-    expected_columns: Sequence[str] = (
-        "ID",
-        "Diver",
-        "Buddy",
-        "Site No.",
-        "Site Name",
-        "Latitude",
-        "Longitude",
-        "Date",
-        "vis",
-        "Direction",
-        "Time",
-        "P-Qs",
-        "Depth",
-        "Method",
-        "Block",
-        "Code",
-        "Species",
-        "Common name",
-        "Total",
-        "Inverts",
-        "2.5",
-        "5",
-        "7.5",
-        "10",
-        "12.5",
-        "15",
-        "20",
-        "25",
-        "30",
-        "35",
-        "40",
-        "50",
-        "62.5",
-        "75",
-        "87.5",
-        "100",
-        "112.5",
-        "125",
-        "137.5",
-        "150",
-        "162.5",
-        "175",
-        "187.5",
-        "200",
-        "250",
-        "300",
-        "350",
-        "400",
-    ),
-) -> pd.DataFrame:
-    if uploaded_file.name.endswith(".csv"):
-        df = pd.read_csv(uploaded_file)
-    else:
-        xls = pd.ExcelFile(uploaded_file)
-        if sheet_name not in xls.sheet_names:
-            raise ValueError(f"No sheet named '{sheet_name}' found.")
-        df = xls.parse(sheet_name)
-        df.columns = df.columns.astype(str)
-    if df.columns.tolist() != list(expected_columns):
-        raise ValueError(f"Columns don't match expected names: {expected_columns}")
-    return df
+    return validation_df, expected_max_sizes, supersedings_used
 
 
 @dataclasses.dataclass
