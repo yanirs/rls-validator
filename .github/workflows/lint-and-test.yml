@@ -45,3 +45,10 @@ jobs:
 
       - name: Run tests
         run: poetry run pytest
+
+      - name: Deploy (master only)
+        if: github.ref == 'refs/heads/master'
+        env:
+          deploy_url: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          curl "$deploy_url"
