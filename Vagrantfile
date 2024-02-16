@@ -12,24 +12,14 @@ Vagrant.configure("2") do |config|
   config.vm.network "forwarded_port", guest: 8501, host: 8501, host_ip: "127.0.0.1"
 
   config.vm.provision "shell", name: "apt dependencies", inline: <<-SHELL
-    apt-get update
-    apt-get install -y pipx
+    apt-get update && apt-get install -y pipx
   SHELL
 
-  config.vm.provision "shell", name: "poetry", privileged: false, inline: <<-SHELL
-    pipx install poetry==$(cat /vagrant/.poetry-version)
+  config.vm.provision "shell", name: "dev env", privileged: false, inline: <<-SHELL
+    cd /vagrant && ./setup-dev-env.sh --yes
   SHELL
 
-  config.vm.provision "shell", name: "python dependencies", privileged: false, inline: <<-SHELL
-    set -e
-    cd /vagrant
-    poetry install
-    poetry run pre-commit install
-    echo "Running Streamlit in screen ('screen -r streamlit'), check http://localhost:8501/"
-    screen -dmS streamlit bash -c "poetry run streamlit run --server.runOnSave true --server.fileWatcherType poll rlsv/app.py"
-  SHELL
-
-  config.vm.provision "shell", name: "apt-upgrade", run: "always", inline: <<-SHELL
+  config.vm.provision "shell", name: "apt upgrade", run: "always", inline: <<-SHELL
     apt-get update && apt-get upgrade -y
   SHELL
 end
