@@ -25,7 +25,7 @@ python = "~3.10"
 httpx = "~0.26.0"
 openpyxl = "~3.1.2"
 pandas = "~2.1.4"
-streamlit = "~1.29.0"
+streamlit = "~1.30.0"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = "~3.6.0"
