@@ -4,6 +4,8 @@ Streamlit app for validating data entry by [Reef Life Survey](https://yanirserou
 
 ## Setup
 
-Develop in a VirtualBox:
+To develop locally in a VirtualBox, install [Vagrant](https://www.vagrantup.com/) and run:
 
     $ vagrant up
+
+Alternatively, run in a GitHub Codespace. Once the Codespace is started, Streamlit should be running in dev mode.

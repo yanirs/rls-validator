@@ -1,0 +1,15 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/python
+{
+	"name": "Python 3",
+	"image": "mcr.microsoft.com/devcontainers/python:1-3.10-bookworm",
+
+	// Streamlit default port.
+	"forwardPorts": [8501],
+
+	// One-off creation of dev env.
+	"postCreateCommand": "./setup-dev-env.sh --yes",
+
+	// Run the streamlit app in dev mode.
+	"postStartCommand": "poetry run streamlit run --server.runOnSave true rlsv/app.py"
+}

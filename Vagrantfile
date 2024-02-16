@@ -22,4 +22,10 @@ Vagrant.configure("2") do |config|
   config.vm.provision "shell", name: "apt upgrade", run: "always", inline: <<-SHELL
     apt-get update && apt-get upgrade -y
   SHELL
+
+  config.vm.provision "shell", name: "run streamlit", privileged: false, run: "always", inline: <<-SHELL
+    echo "Running Streamlit in screen ('screen -r streamlit'), check http://localhost:8501/"
+    cd /vagrant
+    screen -dmS streamlit bash -c "poetry run streamlit run --server.runOnSave true --server.fileWatcherType poll rlsv/app.py"
+  SHELL
 end
