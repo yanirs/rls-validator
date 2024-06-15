@@ -95,3 +95,10 @@ VALIDATION_HELP_TEXT: Final[str] = f"""
       this excludes species for which sizing isn't expected or for which there is no
       data. It's not always right, so use your best judgement.
 """
+
+MAX_SIZE_OVERRIDES: dict[str, float] = {
+    "Chaetodontoplus conspicillatus": 25,
+    "Cirrhitichthys falco": 10,
+    "Pelates sexlineatus": 20,
+    "Pseudolabrus luculentus": 25,
+}

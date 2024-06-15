@@ -15,6 +15,7 @@ from rlsv.constants import (
     ALL_COLUMNS,
     DUPLICATE_CHECK_COLUMNS,
     IGNORED_COLUMNS,
+    MAX_SIZE_OVERRIDES,
     SIZE_COLUMNS,
     VALIDATION_HELP_TEXT,
 )
@@ -249,6 +250,9 @@ def _run_rls_data_validations(
             expected_max_sizes.append(None)
             species_in_distribution.append(False)
             continue
+        species_info.max_length_cm = MAX_SIZE_OVERRIDES.get(
+            species_info.name, species_info.max_length_cm
+        )
         if species_info.superseded_by_name:
             supersedings_used[species_info.name] = species_info.superseded_by_name
         species_known.append(True)
