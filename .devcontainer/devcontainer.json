@@ -7,9 +7,16 @@
 	// Streamlit default port.
 	"forwardPorts": [8501],
 
-	// One-off creation of dev env.
-	"postCreateCommand": "./setup-dev-env.sh --yes",
+	// Create (or refresh) the dev env on start.
+	// Technically, it makes more sense for setup-dev-env.sh to be a postCreateCommand,
+	// but this doesn't work locally on VSCode due to this issue:
+	// https://github.com/microsoft/vscode-remote-release/issues/9965
+	// (mounted repo dir is owned by root, and it's only marked as safe after
+	// postCreateCommand, which makes pre-commit hook installation fail)
+	"postStartCommand": "./setup-dev-env.sh --yes",
 
-	// Run the streamlit app in dev mode.
-	"postStartCommand": "poetry run streamlit run --server.runOnSave true rlsv/app.py"
+	// Not actually running it since it now includes an interactive email question.
+	// TODO: This can be improved by writing ~/.streamlit/credentials.toml as part of
+	// the setup, but it may make more sense to do in a separate Dockerfile.
+	"postAttachCommand": "echo Run streamlit in dev mode: 'poetry run streamlit run --server.runOnSave true rlsv/app.py'"
 }

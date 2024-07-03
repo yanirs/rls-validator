@@ -15,6 +15,10 @@ Vagrant.configure("2") do |config|
     apt-get update && apt-get install -y pipx
   SHELL
 
+  config.vm.provision "shell", name: "pipx ensurepath", privileged: false, inline: <<-SHELL
+    pipx ensurepath
+  SHELL
+
   config.vm.provision "shell", name: "dev env", privileged: false, inline: <<-SHELL
     cd /vagrant && ./setup-dev-env.sh --yes
   SHELL
