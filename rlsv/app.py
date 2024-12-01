@@ -37,12 +37,12 @@ def main() -> None:
         return
     try:
         data_df = _parse_uploaded_file(uploaded_file)
+        settings = _get_app_settings()
+        data_df, info_messages = _tweak_data_df(data_df, settings)
     except Exception as ex:
-        st.error(f"Unable to parse the file. Error: {ex}")
+        st.error(f"Unable to parse the file. {ex}")
         return
 
-    settings = _get_app_settings()
-    data_df, info_messages = _tweak_data_df(data_df, settings)
     validation_df = _run_basic_validations(data_df)
     validation_df, expected_max_sizes, supersedings_used = _run_rls_data_validations(
         data_df, validation_df, info_messages, settings
@@ -99,7 +99,9 @@ def _parse_uploaded_file(
         df = xls.parse(sheet_name)
         df.columns = df.columns.astype(str)
     if df.columns.tolist() != list(ALL_COLUMNS):
-        raise ValueError(f"Columns don't match expected names: {ALL_COLUMNS}")
+        raise ValueError(
+            f"The '{sheet_name}' sheet must only include these columns: {ALL_COLUMNS}."
+        )
     return df
 
 
@@ -160,7 +162,13 @@ def _tweak_data_df(
     info_messages.append(
         f"* Ran validations on the {len(data_df)} remaining data rows."
     )
-    data_df["Method"] = data_df["Method"].astype(int)
+    for int_col in ("Method", "Block", "Total"):
+        try:
+            data_df[int_col] = data_df[int_col].astype(int)
+        except ValueError as err:
+            raise ValueError(
+                f"All values in the '{int_col}' column must be whole numbers."
+            ) from err
     data_df["Row max size"] = (
         data_df[SIZE_COLUMNS]
         .apply(methodcaller("last_valid_index"), axis=1)
