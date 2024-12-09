@@ -12,15 +12,15 @@ jobs:
 
     steps:
       - name: Check out repo
-        uses: actions/checkout@8e5e7e5ab8b370d6c329ec480221332ada57f0ab  # pin@v3.5.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pin@v4.2.2
 
       - name: Set up Python
-        uses: actions/setup-python@57ded4d7d5e986d7296eab16560982c6dd7c923b  # pin@v4.6.0
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # pin@v5.3.0
         with:
           python-version: "3.12"
 
       - name: Set up cache
-        uses: actions/cache@88522ab9f39a2ea568f7027eddc7d8d8bc9d59c8  # pin@v3.3.1
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57  # pin@v4.2.0
         id: cache
         with:
           path: |
