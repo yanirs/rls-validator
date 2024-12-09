@@ -1,22 +1,28 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/python
 {
-	"name": "Python 3",
-	"image": "mcr.microsoft.com/devcontainers/python:1-3.10-bookworm",
+  "name": "Python 3",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.10-bookworm",
 
-	// Streamlit default port.
-	"forwardPorts": [8501],
+  // Streamlit default port.
+  "forwardPorts": [8501],
 
-	// Create (or refresh) the dev env on start.
-	// Technically, it makes more sense for setup-dev-env.sh to be a postCreateCommand,
-	// but this doesn't work locally on VSCode due to this issue:
-	// https://github.com/microsoft/vscode-remote-release/issues/9965
-	// (mounted repo dir is owned by root, and it's only marked as safe after
-	// postCreateCommand, which makes pre-commit hook installation fail)
-	"postStartCommand": "./setup-dev-env.sh --yes",
+  // Create (or refresh) the dev env on start.
+  // Technically, it makes more sense for setup-dev-env.sh to be a postCreateCommand,
+  // but this doesn't work locally on VSCode due to this issue:
+  // https://github.com/microsoft/vscode-remote-release/issues/9965
+  // (mounted repo dir is owned by root, and it's only marked as safe after
+  // postCreateCommand, which makes pre-commit hook installation fail)
+  // TODO: this doesn't work with JetBrains, which uses /.jbdevcontainer/. Go figure.
+  "postStartCommand": "./setup-dev-env.sh --yes",
 
-	// Not actually running it since it now includes an interactive email question.
-	// TODO: This can be improved by writing ~/.streamlit/credentials.toml as part of
-	// the setup, but it may make more sense to do in a separate Dockerfile.
-	"postAttachCommand": "echo Run streamlit in dev mode: 'poetry run streamlit run --server.runOnSave true rlsv/app.py'"
+  // Not actually running it since it now includes an interactive email question.
+  // TODO: This can be improved by writing ~/.streamlit/credentials.toml as part of
+  // the setup, but it may make more sense to do in a separate Dockerfile.
+  "postAttachCommand": "echo Run streamlit in dev mode: 'poetry run streamlit run --server.runOnSave true rlsv/app.py'",
+
+  // Needed for JetBrain Gateway to work. VSCode seems fine without it, but it should
+  // also obviate the need to sudo in the container. When using rootless Docker (e.g.,
+  // via Docker Desktop), root is an unprivileged host user anyway.
+  "remoteUser": "root",
 }
