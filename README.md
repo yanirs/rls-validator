@@ -25,7 +25,7 @@ This is a bit involved and rare, so worth documenting:
 3. Test locally.
 4. Update the version in `lint-and-test.yml`.
 5. Push to main repo.
-6. On Render, update the `PYTHON_VERSION` env var (requires [minor version](https://docs.render.com/python-version), 
+6. On Render, update the `PYTHON_VERSION` env var (requires [minor version](https://docs.render.com/python-version),
    which can be found [on the Python website](https://www.python.org/downloads/))
 7. Test the Render deployment.
 8. Update the yanirs-streamlit fork.
