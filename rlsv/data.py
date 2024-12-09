@@ -1,4 +1,5 @@
 """Data loading functionality."""
+
 import os
 import sys
 from datetime import datetime, timezone
@@ -50,6 +51,7 @@ def download_text_file(
     ------
     Exception
         If the file does not exist locally and the download failed.
+
     """
     local_path = get_app_data_dir(app_name) / url.split("/")[-1]
     if local_path.exists():

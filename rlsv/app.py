@@ -1,11 +1,13 @@
 """Reef Life Survey volunteer data validator: Streamlit app."""
+
 import dataclasses
 import io
 import json
 import math
 from collections import defaultdict
+from collections.abc import Sequence
 from operator import methodcaller
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -272,7 +274,7 @@ def _run_rls_data_validations(
             or species_info.superseded_by_name
             in site_to_expected_species[row["Site No."]]
         )
-        if [2] == species_info.methods:
+        if species_info.methods == [2]:
             m1_sized.append(True)
             max_size_ok.append(True)
             expected_max_sizes.append(None)

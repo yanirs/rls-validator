@@ -1,5 +1,7 @@
 """Various constant values."""
-from typing import Final, Sequence
+
+from collections.abc import Sequence
+from typing import Final
 
 # Columns and subset of columns of the uploaded data sheet.
 ALL_COLUMNS: Final[Sequence[str]] = [
